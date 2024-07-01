@@ -1,0 +1,94 @@
+# Vessel Monitoring System
+
+This project is a vessel monitoring system built using Seeed Studio Xiao Sense, Xiao Expansion Board with OLED, a UART WiFi module, a normally open float switch, and a UART SIM800L cellular module. The system displays a 30-second countdown on the OLED screen, calibrates the IMU sensor, converts to Euler angles, and stores these values for comparison with future readings. It also sets up the WiFi module as an access point to configure the vessel's name, contact numbers, and angle thresholds for list and trim notifications. Reports are sent at specified times via the cellular module.
+
+## Features
+
+- 5-second display of a company logo on the OLED screen.
+- 30-second countdown displayed on the OLED screen.
+- IMU calibration and storage of initial Euler angles.
+- WiFi module setup as an access point for configuring vessel details.
+- Monitoring of list and trim angles with alerts sent via SMS.
+- Regular reports sent at 08:00, 12:00, and 18:00.
+- Power-saving by turning off the OLED screen after the countdown.
+
+## Hardware Requirements
+
+- Seeed Studio Xiao Sense
+- Xiao Expansion Board with OLED
+- UART WiFi Module
+- Normally Open Float Switch
+- UART SIM800L Cellular Module
+
+## Software Requirements
+
+- Arduino IDE
+- Adafruit SSD1306 Library
+- Adafruit GFX Library
+- Adafruit Unified Sensor Library
+- Adafruit BNO055 Library
+- SoftwareSerial Library
+- WiFiManager Library
+- FlashStorage Library
+- TimeLib Library
+
+## Pin Configuration
+
+- **OLED Display**: Connected to the Xiao Expansion Board
+- **WiFi Module**: RX to pin 6, TX to pin 7
+- **Float Switch**: Connected to pin 2
+- **SIM800L Cellular Module**: Connected to UART pins
+
+## Installation
+
+1. **Install Arduino IDE:**
+   Download and install the [Arduino IDE](https://www.arduino.cc/en/software).
+
+2. **Install Required Libraries:**
+   Open Arduino IDE and go to **Sketch > Include Library > Manage Libraries...** and install the following libraries:
+   - Adafruit SSD1306
+   - Adafruit GFX
+   - Adafruit Unified Sensor
+   - Adafruit BNO055
+   - SoftwareSerial
+   - WiFiManager
+   - FlashStorage
+   - TimeLib
+
+3. **Clone the Repository:**
+   Clone this repository to your local machine using:
+   ```bash
+   git clone https://github.com/your-username/vessel-monitoring-system.git
+Open the Project:
+Open the Arduino sketch file vessel_monitoring_system.ino in the Arduino IDE.
+
+Upload the Code:
+Connect the Xiao Sense board to your computer and upload the code to the board.
+
+Usage
+Power On:
+Power on the system. The OLED screen will display the company logo for 5 seconds, followed by a 30-second countdown.
+
+Calibration:
+The IMU sensor will be calibrated, and the initial Euler angles will be stored.
+
+WiFi Setup:
+Connect to the WiFi module's access point named Vessel_Setup_AP to configure the vessel name, contact numbers, and angle thresholds.
+
+Monitoring:
+The system will monitor the float switch state. If the float switch is triggered, the system will check the IMU angles and send alerts if the thresholds are exceeded.
+
+Reports:
+Reports will be sent via SMS at 08:00, 12:00, and 18:00 with the current difference from the initial readings. You can reset the stored values by replying with 1.
+
+Contributing
+Contributions are welcome! Please fork this repository and submit pull requests for any improvements.
+
+License
+This project is licensed under the MIT License. See the LICENSE file for details.
+
+Acknowledgements
+Special thanks to Seeed Studio for their hardware and support.
+
+Contact
+For any inquiries, please contact jelsenburg@gmail.com.
