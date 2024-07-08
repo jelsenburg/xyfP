@@ -1,99 +1,48 @@
 #include <Wire.h>
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_Sensor.h>
-#include <Adafruit_BNO055.h>
+#include <Adafruit_LSM6DS3TRC.h>
 #include <SoftwareSerial.h>
-#include <WiFiManager.h>
-#include <FlashStorage.h>
-#include <TimeLib.h>
 
-// OLED display settings
+// OLED display
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // IMU sensor
-Adafruit_BNO055 bno = Adafruit_BNO055(55);
+Adafruit_LSM6DS3TRC lsm6ds3trc;
 
-// Software serial for WiFi module
-SoftwareSerial wifiSerial(6, 7); // RX, TX pins for WiFi module
+// WiFi and SIM800L modules
+SoftwareSerial wifiSerial(2, 3); // RX, TX for WiFi module
+SoftwareSerial sim800l(4, 5);    // RX, TX for SIM800L
 
-// Float switch pin
-const int floatSwitchPin = 2;
-bool floatSwitchState = false;
-
-// Data structure for storing settings
-struct Settings {
-  char vesselName[32];
-  char contactNumbers[3][16];
-  float listAngleThreshold;
-  float trimAngleThreshold;
+// Company logo
+const unsigned char company_logo [] PROGMEM = {
+  // Add your company logo bitmap data here
 };
 
-FlashStorage(settingsStorage, Settings);
-Settings settings;
-float initialEuler[3];
-float currentEuler[3];
+// Calibration data
+float calibRoll = 0, calibPitch = 0;
 
-void setup() {
-  Serial.begin(9600);
-  wifiSerial.begin(9600);
+// Contact numbers and threshold angles
+String vesselName;
+String contact1, contact2, contact3;
+float alertRollThreshold = 3.0;  // Default Roll Alert Threshold in degrees
+float alertPitchThreshold = 3.0; // Default Pitch Alert Threshold in degrees
 
-  pinMode(floatSwitchPin, INPUT);
-
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  display.clearDisplay();
-  display.display();
-
-  showLogo();
-  countdown(30);
-
-  if (!bno.begin()) {
-    Serial.println("No BNO055 detected");
-    while (1);
-  }
-
-  bno.setExtCrystalUse(true);
-  calibrateIMU();
-
-  WiFiManager wifiManager;
-  wifiManager.autoConnect("Vessel_Setup_AP");
-
-  loadSettings();
-
-  display.clearDisplay();
-  display.display();
-}
-
-void loop() {
-  if (digitalRead(floatSwitchPin) == HIGH) {
-    floatSwitchState = true;
-    checkIMU();
-    sendReports();
-  } else {
-    floatSwitchState = false;
-  }
-
-  delay(60000); // Check every minute
-}
-
+// Functions
 void showLogo() {
   display.clearDisplay();
-  display.setTextSize(2);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println("Company");
+  display.drawBitmap(0, 0, company_logo, SCREEN_WIDTH, SCREEN_HEIGHT, 1);
   display.display();
   delay(5000);
 }
 
-void countdown(int seconds) {
-  for (int i = seconds; i > 0; i--) {
+void countdown() {
+  for (int i = 30; i > 0; i--) {
     display.clearDisplay();
     display.setTextSize(2);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
+    display.setCursor(0, 20);
     display.print("Countdown: ");
     display.print(i);
     display.display();
@@ -104,91 +53,115 @@ void countdown(int seconds) {
 }
 
 void calibrateIMU() {
-  sensors_event_t event;
-  bno.getEvent(&event);
-  initialEuler[0] = event.orientation.x;
-  initialEuler[1] = event.orientation.y;
-  initialEuler[2] = event.orientation.z;
+  sensors_event_t accel;
+  lsm6ds3trc.getEvent(&accel, NULL, NULL);
+  // Convert to Euler angles
+  calibRoll = atan2(accel.acceleration.y, accel.acceleration.z) * 180 / PI;
+  calibPitch = atan2(-accel.acceleration.x, sqrt(accel.acceleration.y * accel.acceleration.y + accel.acceleration.z * accel.acceleration.z)) * 180 / PI;
 }
 
-void checkIMU() {
-  sensors_event_t event;
-  bno.getEvent(&event);
-  currentEuler[0] = event.orientation.x;
-  currentEuler[1] = event.orientation.y;
-  currentEuler[2] = event.orientation.z;
-
-  for (int i = 0; i < 3; i++) {
-    if (currentEuler[i] - initialEuler[i] > 180.0) currentEuler[i] -= 360.0;
-    if (currentEuler[i] - initialEuler[i] < -180.0) currentEuler[i] += 360.0;
-  }
-
-  float listDiff = currentEuler[2] - initialEuler[2];
-  float trimDiff = currentEuler[0] - initialEuler[0];
-
-  if (abs(listDiff) >= settings.listAngleThreshold || abs(trimDiff) >= settings.trimAngleThreshold) {
-    sendAlert(listDiff, trimDiff);
-  }
+void correctAngles(float &roll, float &pitch) {
+  if (roll < 0) roll += 360;
+  if (pitch < 0) pitch += 360;
+  if (roll >= 360) roll -= 360;
+  if (pitch >= 360) pitch -= 360;
 }
 
-void sendAlert(float listDiff, float trimDiff) {
-  for (int i = 0; i < 3; i++) {
-    wifiSerial.print("AT+CMGF=1\r");
-    delay(100);
-    wifiSerial.print("AT+CMGS=\"");
-    wifiSerial.print(settings.contactNumbers[i]);
-    wifiSerial.print("\"\r");
-    delay(100);
-    wifiSerial.print("Alert! Vessel List: ");
-    wifiSerial.print(listDiff);
-    wifiSerial.print(", Trim: ");
-    wifiSerial.print(trimDiff);
-    wifiSerial.write(26);
-    delay(1000);
-  }
+void getInputFromWiFi() {
+  Serial.println("Waiting for data from WiFi module...");
+
+  // Assuming data is sent in the format: vesselName,alertRoll,alertPitch,contact1,contact2,contact3
+  while (!wifiSerial.available());
+  String data = wifiSerial.readStringUntil('\n');
+  int index = 0;
+
+  vesselName = data.substring(index, data.indexOf(',', index));
+  index = data.indexOf(',', index) + 1;
+  
+  alertRollThreshold = data.substring(index, data.indexOf(',', index)).toFloat();
+  if (alertRollThreshold == 0) alertRollThreshold = 3.0; // Default to 3 degrees
+  index = data.indexOf(',', index) + 1;
+
+  alertPitchThreshold = data.substring(index, data.indexOf(',', index)).toFloat();
+  if (alertPitchThreshold == 0) alertPitchThreshold = 3.0; // Default to 3 degrees
+  index = data.indexOf(',', index) + 1;
+
+  contact1 = data.substring(index, data.indexOf(',', index));
+  index = data.indexOf(',', index) + 1;
+
+  contact2 = data.substring(index, data.indexOf(',', index));
+  index = data.indexOf(',', index) + 1;
+
+  contact3 = data.substring(index);
+
+  Serial.println("Data received:");
+  Serial.println("Vessel Name: " + vesselName);
+  Serial.println("Roll Alert Set Point: " + String(alertRollThreshold));
+  Serial.println("Pitch Alert Set Point: " + String(alertPitchThreshold));
+  Serial.println("Contact Number 1: " + contact1);
+  Serial.println("Contact Number 2: " + contact2);
+  Serial.println("Contact Number 3: " + contact3);
 }
 
-void sendReports() {
-  int currentHour = hour();
-  if (currentHour == 8 || currentHour == 12 || currentHour == 18) {
-    for (int i = 0; i < 3; i++) {
-      wifiSerial.print("AT+CMGF=1\r");
-      delay(100);
-      wifiSerial.print("AT+CMGS=\"");
-      wifiSerial.print(settings.contactNumbers[i]);
-      wifiSerial.print("\"\r");
-      delay(100);
-      wifiSerial.print("Vessel Report at ");
-      wifiSerial.print(currentHour);
-      wifiSerial.print(":00\nList: ");
-      wifiSerial.print(currentEuler[2] - initialEuler[2]);
-      wifiSerial.print("\nTrim: ");
-      wifiSerial.print(currentEuler[0] - initialEuler[0]);
-      wifiSerial.write(26);
-      delay(1000);
+void sendDataToGoogleSheets(float roll, float pitch, float batteryLevel) {
+  // Your logic to send data to Google Sheets using GSM
+}
+
+void resetCalibration() {
+  calibrateIMU();
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+
+  wifiSerial.begin(9600);
+  sim800l.begin(9600);
+
+  showLogo();
+  countdown();
+
+  if (!lsm6ds3trc.begin_I2C()) {
+    Serial.println("Failed to initialize LSM6DS3TRC!");
+    while (1);
+  }
+
+  calibrateIMU();
+
+  getInputFromWiFi(); // Get vessel name, contact numbers, and alert thresholds
+}
+
+void loop() {
+  sensors_event_t accel;
+  lsm6ds3trc.getEvent(&accel, NULL, NULL);
+
+  float roll = atan2(accel.acceleration.y, accel.acceleration.z) * 180 / PI;
+  float pitch = atan2(-accel.acceleration.x, sqrt(accel.acceleration.y * accel.acceleration.y + accel.acceleration.z * accel.acceleration.z)) * 180 / PI;
+  
+  correctAngles(roll, pitch);
+
+  float diffRoll = fabs(roll - calibRoll);
+  float diffPitch = fabs(pitch - calibPitch);
+
+  if (diffRoll > alertRollThreshold || diffPitch > alertPitchThreshold) {
+    float batteryLevel = analogRead(A0) * (3.3 / 1023.0);
+    sendDataToGoogleSheets(diffRoll, diffPitch, batteryLevel);
+  }
+
+  // Listen for a command to reset calibration (example logic)
+  if (Serial.available()) {
+    String command = Serial.readString();
+    if (command == "RESET") {
+      resetCalibration();
     }
   }
-}
 
-void loadSettings() {
-  settings = settingsStorage.read();
-  if (settings.vesselName[0] == '\0') {
-    strcpy(settings.vesselName, "Default Vessel");
-    strcpy(settings.contactNumbers[0], "+1234567890");
-    strcpy(settings.contactNumbers[1], "+0987654321");
-    strcpy(settings.contactNumbers[2], "+1122334455");
-    settings.listAngleThreshold = 5.0;
-    settings.trimAngleThreshold = 5.0;
-    settingsStorage.write(settings);
+  // Example to turn off OLED after countdown
+  static bool oledOff = false;
+  if (!oledOff) {
+    delay(30000); // Wait for 30 seconds
+    display.ssd1306_command(SSD1306_DISPLAYOFF);
+    oledOff = true;
   }
-}
-
-void updateSettings(const char* vesselName, const char* contact1, const char* contact2, const char* contact3, float listThreshold, float trimThreshold) {
-  strcpy(settings.vesselName, vesselName);
-  strcpy(settings.contactNumbers[0], contact1);
-  strcpy(settings.contactNumbers[1], contact2);
-  strcpy(settings.contactNumbers[2], contact3);
-  settings.listAngleThreshold = listThreshold;
-  settings.trimAngleThreshold = trimThreshold;
-  settingsStorage.write(settings);
 }
